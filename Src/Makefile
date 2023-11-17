@@ -1,4 +1,4 @@
 all: myPortScanner
 
 scanner: myPortScanner.c
-	gcc -o myPortScanner myPortScanner.c
+	gcc -g -o myPortScanner -l pthread myPortScanner.c
