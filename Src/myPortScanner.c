@@ -13,6 +13,18 @@
 
 #include "arg_parse.h"
 
+void print_banner()
+{
+    printf("\033[37m                  ___           _     \033[92m __\n"
+           "\033[37m  /\\/\\  _   _    / __\\___  _ __| |_  \033[92m / _\\ ___ __ _ _ __  _ __   ___ _ __\n"
+           "\033[37m /    \\| | | |  / /_)/ _ \\| '__| __| \033[92m \\ \\ / __/ _` | '_ \\| '_ \\ / _ \\ '__|\n"
+           "\033[37m/ /\\/\\ \\ |_| | / ___/ (_) | |  | |_  \033[92m _\\ \\ (_| (_| | | | | | | |  __/ |\n"
+           "\033[37m\\/    \\/\\__, | \\/    \\___/|_|  \\__| \033[92m  \\__/\\___\\__,_|_| |_|_| |_|\\___|_|\n"
+           "\033[37m        |____/\n");
+}
+
+
+
 struct thread_options {
 	char host[INET_ADDRSTRLEN]; //inet_addrstrlen = 16
 	int port;
@@ -67,6 +79,7 @@ void *thread_routine(void *thread_args)
 
         close(sockfd);
     }
+    return NULL;
 }
 
 void create_thread(struct arguments user_args)
@@ -102,6 +115,7 @@ void create_thread(struct arguments user_args)
 
 int main(int argc, char **argv)
 {
+    print_banner();
     struct arguments user_args;
     struct hostent *target;
     int rc, fd;

@@ -12,7 +12,7 @@ struct arguments
     int threads;                // numar de thread-uri
     int start_port;             // port inceput range
     int end_port;               // port sfarsit range
-    int verbose;                // verbose
+    int verbose;                // serviciu
     int menu;
 };
 
