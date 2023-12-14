@@ -20,11 +20,6 @@ struct arguments
     int fin_scan;               // opțiune pentru scanare FIN
     int xmas_scan;              // opțiune pentru scanare XMAS
 };
-// Descrierea programului pentru mesajul --help
-char doc[] = "myPortScanner -- a simple port scanner.";
-
-// Descrierea argumentelor pentru mesajul --help
-char args_doc[] = "HOST [options]";
 
 struct argp_option options[] = {
     {"host", 'h', "HOST", 0, "Target host to scan"},
@@ -107,7 +102,7 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
     return 0;
 }
 
-struct argp argp = {options, parse_opt, args_doc, doc};
+struct argp argp = {options, parse_opt};
 
 struct arguments parse_args(int argc, char *argv[])
 {
