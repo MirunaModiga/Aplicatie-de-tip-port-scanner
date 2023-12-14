@@ -13,15 +13,26 @@ struct arguments
     int start_port;             // port inceput range
     int end_port;               // port sfarsit range
     int verbose;                // serviciu
-    int menu;
+    int tcp_scan;               // optiune pentru scanare TCP connect
+    int syn_scan;               // opțiune pentru scanare SYN
+    int udp_scan;               // opțiune pentru scanare UDP
+    int null_scan;              // opțiune pentru scanare NULL
+    int fin_scan;               // opțiune pentru scanare FIN
+    int xmas_scan;              // opțiune pentru scanare XMAS
 };
+// Descrierea programului pentru mesajul --help
+char doc[] = "myPortScanner -- a simple port scanner.";
+
+// Descrierea argumentelor pentru mesajul --help
+char args_doc[] = "HOST [options]";
 
 struct argp_option options[] = {
     {"host", 'h', "HOST", 0, "Target host to scan"},
     {"timeout", 't', "SECONDS", 0, "Speed of scanning/seconds of timeout."},
-    {"port", 'p', "PORT", 0, "Port range to scan"},
-    {"threads", 'T', "THREADS", 0, "Number of threads to use for the scan"},
-    {"verbose", 'v', "VERBOSE", 0, "Verbose mode"},
+    {"port", 'p', "PORT NUMBER RANGE", 0, "Port range to scan"},
+    {"threads", 'T', "THREADS NUMBER", 0, "Number of threads to use for the scan"},
+    {"verbose", 'v', "VERBOSE 1/0", 0, "Verbose mode"},
+    {"scan type", 's', "SCAN_TYPE", 0, "TCP/UDP/SYN/NULL/FIN/XMAS"},
     {0}};
 
 error_t parse_opt(int key, char *arg, struct argp_state *state)
@@ -57,6 +68,38 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'v':
         arguments->verbose = 1;
         break;
+    case 's':
+        if (arg != NULL)
+        {
+            if (arg[0] == 'T')
+            {
+                arguments->tcp_scan = 1;
+            }
+            else if (arg[0] == 'S')
+            {
+                arguments->syn_scan = 1;
+            }
+            else if (arg[0] == 'U')
+            {
+                arguments->udp_scan = 1;
+            }
+            else if (arg[0] == 'N')
+            {
+                arguments->null_scan = 1;
+            }
+            else if (arg[0] == 'F')
+            {
+                arguments->fin_scan = 1;
+            }
+            else if (arg[0] == 'X')
+            {
+                arguments->xmas_scan = 1;
+            }
+        }
+        break;
+    case 'H':
+        argp_state_help(state, stdout, ARGP_HELP_LONG | ARGP_HELP_PRE_DOC);
+        exit(0);
     default:
         return ARGP_ERR_UNKNOWN;
     }
@@ -64,18 +107,24 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
     return 0;
 }
 
-struct argp argp = {options, parse_opt};
+struct argp argp = {options, parse_opt, args_doc, doc};
 
 struct arguments parse_args(int argc, char *argv[])
 {
-    static struct arguments arguments;
+    struct arguments arguments;
     strcpy(arguments.host, "");
     arguments.timeout = 5;
     arguments.threads = 5;
     arguments.start_port = 1;
     arguments.end_port = 65535;
     arguments.verbose = 0;
+    arguments.tcp_scan = 0;
+    arguments.syn_scan = 0;
+    arguments.udp_scan = 0;
+    arguments.null_scan = 0;
+    arguments.fin_scan = 0;
+    arguments.xmas_scan = 0;
 
-    int i = argp_parse(&argp, argc, argv, 0, 0, &arguments);
+    argp_parse(&argp, argc, argv, 0, 0, &arguments);
     return arguments;
 }
