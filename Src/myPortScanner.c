@@ -43,35 +43,6 @@ struct thread_options
     int xmas_scan; // opțiune pentru scanare XMAS
 };
 
-int scanner_error(const char *s, int sock);
-
-unsigned short csum(unsigned short *ptr, int nbytes)
-{
-    register long sum;
-    unsigned short oddbyte;
-    register short answer;
-
-    sum = 0;
-    while (nbytes > 1)
-    {
-        sum += *ptr++;
-        nbytes -= 2;
-    }
-
-    if (nbytes == 1)
-    {
-        oddbyte = 0;
-        *((u_char *)&oddbyte) = *(u_char *)ptr;
-        sum += oddbyte;
-    }
-
-    sum = (sum >> 16) + (sum & 0xffff);
-    sum += (sum >> 16);
-    answer = (short)~sum;
-
-    return answer;
-}
-
 int get_local_ip(char *source_ip)
 {
     const char *google_dns_server = "8.8.8.8";
@@ -119,7 +90,7 @@ void TCP_scan(struct thread_options *args, int port)
     struct timeval tv;
     tv.tv_sec = args->timeout;
     tv.tv_usec = 0;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&args->timeout, sizeof(tv));
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
 
     int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret >= 0)
@@ -185,141 +156,177 @@ void UDP_scan(struct thread_options *args, int port)
     close(sockfd);
 }
 
+struct pseudo_header 
+{
+    unsigned int source_address;
+    unsigned int dest_address;
+    unsigned char placeholder;
+    unsigned char protocol;
+    unsigned short tcp_length;
+
+    struct tcphdr tcp;
+};
+
+unsigned short csum(unsigned short *ptr, int nbytes)
+{
+    register long sum;
+    unsigned short oddbyte;
+    register short answer;
+
+    sum = 0;
+    while (nbytes > 1)
+    {
+        sum += *ptr++;
+        nbytes -= 2;
+    }
+    if (nbytes == 1)
+    {
+        oddbyte = 0;
+        *((u_char *)&oddbyte) = *(u_char *)ptr;
+        sum += oddbyte;
+    }
+
+    sum = (sum >> 16) + (sum & 0xffff);
+    sum = sum + (sum >> 16);
+    answer = (short)~sum;
+
+    return (answer);
+}
+
 void SYN_scan(struct thread_options *args, int port)
 {
-        int sockfd;
-        struct iphdr *ip_header;
-        struct tcphdr *tcp_header;
-        char packet[5000];
+    int sockfd;
+    struct iphdr *ip_header;
+    struct tcphdr *tcp_header;
+    char packet[4096];
+    struct pseudo_header psh;
 
-        sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
 
-        char source_ip[INET_ADDRSTRLEN];
-        get_local_ip(source_ip);
+    char source_ip[INET_ADDRSTRLEN];
+    get_local_ip(source_ip);
 
-        ip_header = (struct iphdr *)packet;
-        ip_header->ihl = 5;
-        ip_header->version = 4;
-        ip_header->tos = 0;
-        ip_header->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
-        ip_header->id = htons(54321);
-        ip_header->frag_off = 0;
-        ip_header->ttl = 255;
-        ip_header->protocol = IPPROTO_TCP;
-        ip_header->check = 0;
-        ip_header->saddr = inet_addr(source_ip);
-        ip_header->daddr = inet_addr(args->host);
+    ip_header = (struct iphdr *)packet;
+    ip_header->ihl = 5;
+    ip_header->version = 4;
+    ip_header->tos = 0;
+    ip_header->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
+    ip_header->id = htons(54321);
+    ip_header->frag_off = htons(16384);
+    ip_header->ttl = 64;
+    ip_header->protocol = IPPROTO_TCP;
+    ip_header->check = 0;
+    ip_header->saddr = inet_addr(source_ip);
+    ip_header->daddr = inet_addr(args->host);
 
-        //ip_header->check = csum((unsigned short *)ip_header, sizeof(struct iphdr));
+    ip_header->check = csum((unsigned short *)packet, ip_header->tot_len >> 1);
 
-        tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
-        tcp_header->source = htons(2500); ////////////
-        tcp_header->dest = htons(port);
-        tcp_header->seq = random();
-        tcp_header->ack_seq = 0;
-        tcp_header->doff = sizeof(*tcp_header) / 4;
-        tcp_header->syn = 1;
-        tcp_header->ack = 0;
-        tcp_header->fin = 0;
-        tcp_header->psh = 0;
-        tcp_header->rst = 0;
-        tcp_header->urg = 0;
-        tcp_header->window = 0;
-        tcp_header->check = 0;
-        tcp_header->urg_ptr = 0;
+    tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
+    tcp_header->source = htons(rand() % (65535 - 1024) + 1024);
+    tcp_header->dest = htons(port);
+    tcp_header->seq = random();
+    tcp_header->ack_seq = 0;
+    tcp_header->doff = sizeof(*tcp_header) / 4;
+    tcp_header->syn = 1;
+    tcp_header->ack = 0;
+    tcp_header->fin = 0;
+    tcp_header->psh = 0;
+    tcp_header->rst = 0;
+    tcp_header->urg = 0;
+    tcp_header->window = htons(4096);
+    tcp_header->check = 0;
+    tcp_header->urg_ptr = 0;
 
-        tcp_header->check = csum((unsigned short *)packet, sizeof(struct iphdr) + sizeof(struct tcphdr));
+    struct sockaddr_in dest;
+    memset(&dest, 0, sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    dest.sin_addr.s_addr = inet_addr(args->host);
 
-        // IP_HDRINCL to tell the kernel that headers are included in the packet
-        int one = 1;
-        const int *val = &one;
+    psh.source_address = inet_addr(source_ip);
+    psh.dest_address = dest.sin_addr.s_addr;
+    psh.placeholder = 0;
+    psh.protocol = IPPROTO_TCP;
+    psh.tcp_length = htons(sizeof(struct tcphdr));
 
-        if (setsockopt(sockfd, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0)
+    memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
+
+    tcp_header->check = csum((unsigned short *)&psh, sizeof(struct pseudo_header));
+
+    // Trimitere packet
+    if (sendto(sockfd, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0)
+    {
+        printf("Error: sendto() failed.\n");
+        close(sockfd);
+        exit(-1);
+    }
+
+    printf("PACKET SENT:\t\tsyn:%d\t ack:%d\t fin:%d\t rst:%d\t psh:%d\t urg:%d\n", tcp_header->syn, tcp_header->ack, tcp_header->fin, tcp_header->rst, tcp_header->psh, tcp_header->urg);
+
+    // Asteptare raspuns
+    fd_set read_fds;
+    struct timeval timeout;
+
+    FD_ZERO(&read_fds);
+    FD_SET(sockfd, &read_fds);
+
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+
+    int ret = select(sockfd + 1, &read_fds, NULL, NULL, &timeout);
+
+    if (ret == 0)
+    {
+        printf("Error: Timeout waiting for response.\n");
+        close(sockfd);
+        exit(-1);
+    }
+    else if (ret < 0)
+    {
+        perror("Error: select() failed.");
+        close(sockfd);
+        exit(-1);
+    }
+
+    // Primire raspuns
+    char recv_buf[4096];
+    struct sockaddr_in recv_src;
+    socklen_t recv_src_len = sizeof(recv_src);
+
+    int recv_len = recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_src, &recv_src_len);
+
+    if (recv_len < 0)
+    {
+        printf("Error: recvfrom() failed.\n");
+        close(sockfd);
+        exit(-1);
+    }
+
+    ip_header = (struct iphdr *)recv_buf;
+    tcp_header = (struct tcphdr *)(recv_buf + ip_header->ihl);
+
+    printf("PACKET RECEIVED:\tsyn:%d\t ack:%d\t fin:%d\t rst:%d\t psh:%d\t urg:%d\n", tcp_header->syn, tcp_header->ack, tcp_header->fin, tcp_header->rst, tcp_header->psh, tcp_header->urg);
+
+    if (tcp_header->syn == 1 && tcp_header->ack == 1)
+    {
+        if (args->verbose == 1)
         {
-            printf("Error setting IP_HDRINCL. Error number: %d. Error message: %s \n", errno, strerror(errno));
-            exit(-1);
-        }
-
-        struct sockaddr_in dest;
-        memset(&dest, 0, sizeof(dest));
-        dest.sin_family = AF_INET;
-        dest.sin_port = htons(port);
-        dest.sin_addr.s_addr = inet_addr(args->host);
-
-        // Trimitere packet
-        if (sendto(sockfd, packet, ip_header->tot_len, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0)
-        {
-            printf("Error: sendto() failed.\n");
-            close(sockfd);
-            exit(-1);
-        }
-
-        printf("PACKET SENT:\t\tsyn:%d\t ack:%d\t fin:%d\t rst:%d\t psh:%d\t urg:%d\n", tcp_header->syn, tcp_header->ack, tcp_header->fin, tcp_header->rst, tcp_header->psh, tcp_header->urg);
-
-        // Asteptare raspuns
-        fd_set read_fds;
-        struct timeval timeout;
-
-        FD_ZERO(&read_fds);
-        FD_SET(sockfd, &read_fds);
-
-        timeout.tv_sec = 30;
-        timeout.tv_usec = 0;
-
-        int ret = select(sockfd + 1, &read_fds, NULL, NULL, &timeout);
-
-        if (ret == 0)
-        {
-            printf("Error: Timeout waiting for response.\n");
-            close(sockfd);
-            exit(-1);
-        }
-        else if (ret < 0)
-        {
-            perror("Error: select() failed.");
-            close(sockfd);
-            exit(-1);
-        }
-
-        // Primire raspuns
-        char recv_buf[1024];
-        struct sockaddr_in recv_src;
-        socklen_t recv_src_len;
-
-        int recv_len = recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_src, &recv_src_len);
-
-        if (recv_len < 0)
-        {
-            printf("Error: recvfrom() failed.\n");
-            close(sockfd);
-            exit(-1);
-        }
-
-        ip_header = (struct iphdr *)recv_buf;
-        tcp_header = (struct tcphdr *)(recv_buf + sizeof(struct iphdr));
-
-        printf("PACKET RECEIVED:\tsyn:%d\t ack:%d\t fin:%d\t rst:%d\t psh:%d\t urg:%d\n", tcp_header->syn, tcp_header->ack, tcp_header->fin, tcp_header->rst, tcp_header->psh, tcp_header->urg);
-
-        if (tcp_header->syn == 1 && tcp_header->ack == 1) 
-        {
-            if (args->verbose == 1)
-            {
-                struct servent *s = getservbyport(htons(port), "tcp");
-                if (s)
-                    printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
-            }
-            else
-            {
-                printf("PORT: %d\tSTARE: OPEN \n", port);
-            }
+            struct servent *s = getservbyport(htons(port), "tcp");
+            if (s)
+                printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
         }
         else
         {
-            printf("invalid SYN-ACK response.\n");
-            close(sockfd);
-            exit(-1);
+            printf("PORT: %d\tSTARE: OPEN \n", port);
         }
+    }
+    else
+    {
+        printf("invalid SYN-ACK response.\n");
         close(sockfd);
+        exit(-1);
+    }
+    close(sockfd);
 }
 
 void NULL_scan() {}
@@ -339,8 +346,6 @@ void *thread_routine(void *thread_args)
     for (int i = 0; i < args->end - args->start + 1; i++)
     {
         int port = ports[i];
-
-        // verific tipul scanarii
         if (args->tcp_scan)
         {
             TCP_scan(args, port);
@@ -465,15 +470,5 @@ int main(int argc, char **argv)
     double total_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
     printf("\nScan duration: %.2f seconds\n", total_time);
 
-    return 0;
-}
-
-int scanner_error(const char *s, int sock)
-{
-#ifdef DEBUGING
-    perror(s);
-#endif
-    if (sock)
-        close(sock);
     return 0;
 }
