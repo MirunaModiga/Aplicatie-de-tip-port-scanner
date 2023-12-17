@@ -12,8 +12,16 @@
 #include <sys/fcntl.h>
 #include <netinet/tcp.h> // tcp header
 #include <netinet/ip.h>  // ip header
-
+#include <inttypes.h>
+#include<string.h>
 #include "arg_parse.h"
+#define __BYTE_ORDER __LITTLE_ENDIAN
+#define TH_FIN 0x01
+#define TH_SYN 0x02
+#define TH_RST 0x04
+#define TH_PUSH 0x08
+#define TH_ACK 0x10
+#define TH_URG 0x20
 
 void print_banner()
 {
@@ -43,7 +51,7 @@ struct thread_options
     int xmas_scan; // opțiune pentru scanare XMAS
 };
 
-int get_local_ip(char *source_ip)
+int get_local_ip(char **source_ip)
 {
     const char *google_dns_server = "8.8.8.8";
     int dns_port = 53;
@@ -54,7 +62,7 @@ int get_local_ip(char *source_ip)
     if (sock < 0)
     {
         perror("socket");
-        exit(-1);
+        return 0;
     }
 
     memset(&serv, 0, sizeof(serv));
@@ -70,10 +78,8 @@ int get_local_ip(char *source_ip)
 
     char buffer[100];
     const char *p = inet_ntop(AF_INET, &name.sin_addr, buffer, 100);
-    if (p != NULL)
-    {
-        printf("Local ip is : %s \n", buffer);
-    }
+
+    *source_ip = strdup(buffer);
 
     close(sock);
 }
@@ -106,17 +112,6 @@ void TCP_scan(struct thread_options *args, int port)
             printf("PORT: %d\tSTARE: OPEN \n", port);
         }
     }
-    /*else
-    {
-        if (errno == ECONNREFUSED)
-        {
-            printf("PORT: %d\tSTARE: CLOSED\n", port);
-        }
-        else if (errno == ETIMEDOUT)
-        {
-            printf("PORT: %d\tSTARE: FILTERED\n", port);
-        }
-    }*/
 
     close(sockfd);
 }
@@ -156,7 +151,7 @@ void UDP_scan(struct thread_options *args, int port)
     close(sockfd);
 }
 
-struct pseudo_header 
+struct pseudo_header
 {
     unsigned int source_address;
     unsigned int dest_address;
@@ -203,8 +198,9 @@ void SYN_scan(struct thread_options *args, int port)
 
     sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
 
-    char source_ip[INET_ADDRSTRLEN];
-    get_local_ip(source_ip);
+    char* source_ip=(char*)malloc(INET_ADDRSTRLEN*sizeof(char));
+    get_local_ip(&source_ip);
+
 
     ip_header = (struct iphdr *)packet;
     ip_header->ihl = 5;
@@ -221,22 +217,38 @@ void SYN_scan(struct thread_options *args, int port)
 
     ip_header->check = csum((unsigned short *)packet, ip_header->tot_len >> 1);
 
-    tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
-    tcp_header->source = htons(rand() % (65535 - 1024) + 1024);
-    tcp_header->dest = htons(port);
-    tcp_header->seq = random();
-    tcp_header->ack_seq = 0;
-    tcp_header->doff = sizeof(*tcp_header) / 4;
-    tcp_header->syn = 1;
-    tcp_header->ack = 0;
-    tcp_header->fin = 0;
-    tcp_header->psh = 0;
-    tcp_header->rst = 0;
-    tcp_header->urg = 0;
-    tcp_header->window = htons(4096);
-    tcp_header->check = 0;
-    tcp_header->urg_ptr = 0;
 
+    tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
+
+    tcp_header->th_sport = htons(rand() % (65535 - 1024) + 1024);
+    tcp_header->th_dport = htons((uint16_t)port);
+
+    tcp_header->seq = rand();
+    tcp_header->ack_seq = 0;
+    
+    tcp_header->res1=(uint16_t)0;
+    tcp_header->doff = (uint16_t)5;
+    tcp_header->fin = (uint16_t)0;
+    tcp_header->syn = (uint16_t)1;
+    tcp_header->rst = (uint16_t)0;
+    tcp_header->psh = (uint16_t)0;
+    tcp_header->ack = (uint16_t)0;
+    tcp_header->urg = (uint16_t)0;
+    tcp_header->res2=(uint16_t)0;
+    tcp_header->window = (uint16_t)1;
+    tcp_header->check = (uint16_t)0;
+    tcp_header->urg_ptr = (uint16_t)0;
+
+//IP_HDRINCL to tell the kernel that headers are included in the packet
+	int one = 1;
+	const int *val = &one;
+	
+	if (setsockopt (sockfd, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
+	{
+		printf ("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n" , errno , strerror(errno));
+		return;
+	}
+    
     struct sockaddr_in dest;
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
@@ -258,10 +270,8 @@ void SYN_scan(struct thread_options *args, int port)
     {
         printf("Error: sendto() failed.\n");
         close(sockfd);
-        exit(-1);
+        return;
     }
-
-    printf("PACKET SENT:\t\tsyn:%d\t ack:%d\t fin:%d\t rst:%d\t psh:%d\t urg:%d\n", tcp_header->syn, tcp_header->ack, tcp_header->fin, tcp_header->rst, tcp_header->psh, tcp_header->urg);
 
     // Asteptare raspuns
     fd_set read_fds;
@@ -277,15 +287,15 @@ void SYN_scan(struct thread_options *args, int port)
 
     if (ret == 0)
     {
-        printf("Error: Timeout waiting for response.\n");
+        printf("Error: Timeout waiting for response.\n"); //FILTERED
         close(sockfd);
-        exit(-1);
+        return;
     }
     else if (ret < 0)
     {
         perror("Error: select() failed.");
         close(sockfd);
-        exit(-1);
+        return;
     }
 
     // Primire raspuns
@@ -299,15 +309,15 @@ void SYN_scan(struct thread_options *args, int port)
     {
         printf("Error: recvfrom() failed.\n");
         close(sockfd);
-        exit(-1);
+        return;
     }
 
     ip_header = (struct iphdr *)recv_buf;
-    tcp_header = (struct tcphdr *)(recv_buf + ip_header->ihl);
+    tcp_header = (struct tcphdr *)(recv_buf + sizeof(struct iphdr ));
 
-    printf("PACKET RECEIVED:\tsyn:%d\t ack:%d\t fin:%d\t rst:%d\t psh:%d\t urg:%d\n", tcp_header->syn, tcp_header->ack, tcp_header->fin, tcp_header->rst, tcp_header->psh, tcp_header->urg);
 
-    if (tcp_header->syn == 1 && tcp_header->ack == 1)
+    fflush(stdout);
+    if (tcp_header->syn == 1 && tcp_header->ack == 1 && tcp_header->fin == 0 && tcp_header->rst == 0 && tcp_header->psh == 0 && tcp_header->urg == 0)
     {
         if (args->verbose == 1)
         {
@@ -320,12 +330,14 @@ void SYN_scan(struct thread_options *args, int port)
             printf("PORT: %d\tSTARE: OPEN \n", port);
         }
     }
+    else if(tcp_header->rst==1){
+        printf("PORT: %d\t CLOSED\n",port);
+    }
     else
     {
-        printf("invalid SYN-ACK response.\n");
-        close(sockfd);
-        exit(-1);
+        printf("PORT: %d\tFILTERED\n",port);
     }
+    
     close(sockfd);
 }
 
@@ -361,7 +373,7 @@ void *thread_routine(void *thread_args)
         else
         {
             printf("Tip de scanare necunoscut.\n");
-            exit(-1);
+            return NULL;
         }
     }
     free(ports);
@@ -371,27 +383,29 @@ void *thread_routine(void *thread_args)
 void create_thread(struct arguments user_args)
 {
     int thread_id;
+    
+
     pthread_t threads[user_args.threads];
     struct thread_options opt[user_args.threads];
-
+    
     if (user_args.threads > (user_args.end_port - user_args.start_port + 1))
     {
         user_args.threads = user_args.end_port - user_args.start_port + 1;
     }
-
+    
     // Creare thread-uri
     for (thread_id = 0; thread_id < user_args.threads; thread_id++)
     {
         opt[thread_id].thread_id = thread_id;
         if (thread_id == user_args.threads - 1) // ultimul thread ia si porturile ramase
         {
-            opt[thread_id].start = user_args.start_port + (user_args.end_port - user_args.start_port) / user_args.threads * thread_id;
+            opt[thread_id].start = user_args.start_port + (user_args.end_port - user_args.start_port) / user_args.threads * (thread_id);
             opt[thread_id].end = user_args.end_port;
         }
         else
         {
-            opt[thread_id].start = user_args.start_port + (user_args.end_port - user_args.start_port) / user_args.threads * thread_id;
-            opt[thread_id].end = user_args.start_port + (user_args.end_port - user_args.start_port) / user_args.threads * (thread_id + 1);
+            opt[thread_id].start = user_args.start_port +(user_args.end_port - user_args.start_port) / user_args.threads * (thread_id);
+            opt[thread_id].end = user_args.start_port +(user_args.end_port - user_args.start_port) / user_args.threads * (thread_id +1)-1;
         }
         strcpy(opt[thread_id].host, user_args.host);
         opt[thread_id].timeout = user_args.timeout;
@@ -406,8 +420,9 @@ void create_thread(struct arguments user_args)
         if (pthread_create(&threads[thread_id], NULL, thread_routine, &opt[thread_id]))
         {
             perror("pthread_create");
-            exit(-1);
+            return ;
         }
+        
     }
 
     for (thread_id = 0; thread_id < user_args.threads; thread_id++)
