@@ -13,7 +13,7 @@
 #include <netinet/tcp.h> // tcp header
 #include <netinet/ip.h>  // ip header
 #include <inttypes.h>
-#include<string.h>
+#include <string.h>
 #include "arg_parse.h"
 #define __BYTE_ORDER __LITTLE_ENDIAN
 #define TH_FIN 0x01
@@ -188,7 +188,7 @@ unsigned short csum(unsigned short *ptr, int nbytes)
     return (answer);
 }
 
-void SYN_scan(struct thread_options *args, int port)
+void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
 {
     int sockfd;
     struct iphdr *ip_header;
@@ -198,9 +198,8 @@ void SYN_scan(struct thread_options *args, int port)
 
     sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
 
-    char* source_ip=(char*)malloc(INET_ADDRSTRLEN*sizeof(char));
+    char *source_ip = (char *)malloc(INET_ADDRSTRLEN * sizeof(char));
     get_local_ip(&source_ip);
-
 
     ip_header = (struct iphdr *)packet;
     ip_header->ihl = 5;
@@ -217,7 +216,6 @@ void SYN_scan(struct thread_options *args, int port)
 
     ip_header->check = csum((unsigned short *)packet, ip_header->tot_len >> 1);
 
-
     tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
 
     tcp_header->th_sport = htons(rand() % (65535 - 1024) + 1024);
@@ -225,30 +223,62 @@ void SYN_scan(struct thread_options *args, int port)
 
     tcp_header->seq = rand();
     tcp_header->ack_seq = 0;
-    
-    tcp_header->res1=(uint16_t)0;
+
+    tcp_header->res1 = (uint16_t)0;
     tcp_header->doff = (uint16_t)5;
-    tcp_header->fin = (uint16_t)0;
-    tcp_header->syn = (uint16_t)1;
-    tcp_header->rst = (uint16_t)0;
-    tcp_header->psh = (uint16_t)0;
-    tcp_header->ack = (uint16_t)0;
-    tcp_header->urg = (uint16_t)0;
-    tcp_header->res2=(uint16_t)0;
+
+    if (args->fin_scan == 1)
+    {
+        tcp_header->fin = (uint16_t)1;
+        tcp_header->syn = (uint16_t)0;
+        tcp_header->rst = (uint16_t)0;
+        tcp_header->psh = (uint16_t)0;
+        tcp_header->ack = (uint16_t)0;
+        tcp_header->urg = (uint16_t)0;
+    }
+    else if (args->null_scan == 1)
+    {
+        tcp_header->fin = (uint16_t)0;
+        tcp_header->syn = (uint16_t)0;
+        tcp_header->rst = (uint16_t)0;
+        tcp_header->psh = (uint16_t)0;
+        tcp_header->ack = (uint16_t)0;
+        tcp_header->urg = (uint16_t)0;
+    }
+    else if (args->syn_scan == 1)
+    {
+        tcp_header->fin = (uint16_t)0;
+        tcp_header->syn = (uint16_t)1;
+        tcp_header->rst = (uint16_t)0;
+        tcp_header->psh = (uint16_t)0;
+        tcp_header->ack = (uint16_t)0;
+        tcp_header->urg = (uint16_t)0;
+    }
+    else if (args->xmas_scan == 1)
+    {
+        tcp_header->fin = (uint16_t)1;
+        tcp_header->syn = (uint16_t)0;
+        tcp_header->rst = (uint16_t)0;
+        tcp_header->psh = (uint16_t)1;
+        tcp_header->ack = (uint16_t)0;
+        tcp_header->urg = (uint16_t)1;
+    }
+
+    tcp_header->res2 = (uint16_t)0;
     tcp_header->window = (uint16_t)1;
     tcp_header->check = (uint16_t)0;
     tcp_header->urg_ptr = (uint16_t)0;
 
-//IP_HDRINCL to tell the kernel that headers are included in the packet
-	int one = 1;
-	const int *val = &one;
-	
-	if (setsockopt (sockfd, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
-	{
-		printf ("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n" , errno , strerror(errno));
-		return;
-	}
-    
+    // IP_HDRINCL to tell the kernel that headers are included in the packet
+    int one = 1;
+    const int *val = &one;
+
+    if (setsockopt(sockfd, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0)
+    {
+        printf("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n", errno, strerror(errno));
+        return;
+    }
+
     struct sockaddr_in dest;
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
@@ -280,16 +310,22 @@ void SYN_scan(struct thread_options *args, int port)
     FD_ZERO(&read_fds);
     FD_SET(sockfd, &read_fds);
 
-    timeout.tv_sec = 30;
+    timeout.tv_sec = 15;
     timeout.tv_usec = 0;
 
     int ret = select(sockfd + 1, &read_fds, NULL, NULL, &timeout);
-
     if (ret == 0)
     {
-        printf("Error: Timeout waiting for response.\n"); //FILTERED
-        close(sockfd);
-        return;
+        if (args->syn_scan == 1)
+        {
+            printf("PORT: %d\tSTARE: FILTERED (timeout) \n", port);
+            return;
+        }
+        if (args->fin_scan == 1 || args->xmas_scan == 1 || args->null_scan == 1)
+        {
+            printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
+            return;
+        }
     }
     else if (ret < 0)
     {
@@ -313,37 +349,95 @@ void SYN_scan(struct thread_options *args, int port)
     }
 
     ip_header = (struct iphdr *)recv_buf;
-    tcp_header = (struct tcphdr *)(recv_buf + sizeof(struct iphdr ));
-
+    tcp_header = (struct tcphdr *)(recv_buf + sizeof(struct iphdr));
 
     fflush(stdout);
-    if (tcp_header->syn == 1 && tcp_header->ack == 1 && tcp_header->fin == 0 && tcp_header->rst == 0 && tcp_header->psh == 0 && tcp_header->urg == 0)
+    if (args->syn_scan == 1)
     {
-        if (args->verbose == 1)
+        if (tcp_header->syn == 1 && tcp_header->ack == 1 && tcp_header->fin == 0 && tcp_header->rst == 0 && tcp_header->psh == 0 && tcp_header->urg == 0)
         {
-            struct servent *s = getservbyport(htons(port), "tcp");
-            if (s)
-                printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+            if (args->verbose == 1)
+            {
+                struct servent *s = getservbyport(htons(port), "tcp");
+                if (s)
+                    printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+            }
+            else
+            {
+                printf("PORT: %d\tSTARE: OPEN \n", port);
+            }
+        }
+        else if (tcp_header->rst == 1)
+        {
+            printf("PORT: %d\t CLOSED\n", port);
         }
         else
         {
-            printf("PORT: %d\tSTARE: OPEN \n", port);
+            printf("PORT: %d\tFILTERED\n", port);
         }
     }
-    else if(tcp_header->rst==1){
-        printf("PORT: %d\t CLOSED\n",port);
-    }
-    else
+    else if (args->xmas_scan)
     {
-        printf("PORT: %d\tFILTERED\n",port);
+        if (tcp_header->rst == 1 && tcp_header->ack == 1)
+        {
+            if (args->verbose == 1)
+            {
+                struct servent *s = getservbyport(htons(port), "tcp");
+                if (s)
+                    printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+            }
+            else
+            {
+                printf("PORT: %d\tSTARE: OPEN\n", port);
+            }
+        }
+        else if (tcp_header->rst == 1)
+        {
+            printf("PORT: %d\t CLOSED\n", port);
+        }
+        else
+        {
+            printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
+        }
     }
-    
+    else if (args->fin_scan)
+    {
+        if (tcp_header->fin == 1 && tcp_header->ack == 1)
+        {
+            if (args->verbose == 1)
+            {
+                struct servent *s = getservbyport(htons(port), "tcp");
+                if (s)
+                    printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+            }
+            else
+            {
+                printf("PORT: %d\tSTARE: OPEN\n", port);
+            }
+        }
+        else if (tcp_header->rst == 1)
+        {
+            printf("PORT: %d\t CLOSED\n", port);
+        }
+        else
+        {
+            printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
+        }
+    }
+    else if (args->null_scan)
+    {
+        if (tcp_header->rst == 1)
+        {
+            printf("PORT: %d\t CLOSED\n", port);
+        }
+        else
+        {
+            printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
+        }
+    }
+
     close(sockfd);
 }
-
-void NULL_scan() {}
-
-void XMAS_scan() {}
 
 void *thread_routine(void *thread_args)
 {
@@ -366,14 +460,9 @@ void *thread_routine(void *thread_args)
         {
             UDP_scan(args, port);
         }
-        else if (args->syn_scan)
-        {
-            SYN_scan(args, port);
-        }
         else
         {
-            printf("Tip de scanare necunoscut.\n");
-            return NULL;
+            SYN_NULL_FIN_XMAS_scan(args, port);
         }
     }
     free(ports);
@@ -383,16 +472,15 @@ void *thread_routine(void *thread_args)
 void create_thread(struct arguments user_args)
 {
     int thread_id;
-    
 
     pthread_t threads[user_args.threads];
     struct thread_options opt[user_args.threads];
-    
+
     if (user_args.threads > (user_args.end_port - user_args.start_port + 1))
     {
         user_args.threads = user_args.end_port - user_args.start_port + 1;
     }
-    
+
     // Creare thread-uri
     for (thread_id = 0; thread_id < user_args.threads; thread_id++)
     {
@@ -404,8 +492,8 @@ void create_thread(struct arguments user_args)
         }
         else
         {
-            opt[thread_id].start = user_args.start_port +(user_args.end_port - user_args.start_port) / user_args.threads * (thread_id);
-            opt[thread_id].end = user_args.start_port +(user_args.end_port - user_args.start_port) / user_args.threads * (thread_id +1)-1;
+            opt[thread_id].start = user_args.start_port + (user_args.end_port - user_args.start_port) / user_args.threads * (thread_id);
+            opt[thread_id].end = user_args.start_port + (user_args.end_port - user_args.start_port) / user_args.threads * (thread_id + 1) - 1;
         }
         strcpy(opt[thread_id].host, user_args.host);
         opt[thread_id].timeout = user_args.timeout;
@@ -420,9 +508,8 @@ void create_thread(struct arguments user_args)
         if (pthread_create(&threads[thread_id], NULL, thread_routine, &opt[thread_id]))
         {
             perror("pthread_create");
-            return ;
+            return;
         }
-        
     }
 
     for (thread_id = 0; thread_id < user_args.threads; thread_id++)
@@ -433,8 +520,9 @@ void create_thread(struct arguments user_args)
 
 int main(int argc, char **argv)
 {
-    clock_t start_time, end_time;
-    start_time = clock();
+    struct timespec start_time, end_time;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
+
     print_banner();
     struct arguments user_args;
     struct hostent *target;
@@ -478,12 +566,30 @@ int main(int argc, char **argv)
     {
         printf("SYN scan\n");
     }
+    else if (user_args.xmas_scan)
+    {
+        printf("XMAS scan\n");
+    }
+    else if (user_args.null_scan)
+    {
+        printf("NULL scan\n");
+    }
+    else if (user_args.fin_scan)
+    {
+        printf("FIN scan\n");
+    }
+    else
+    {
+        printf("CUSTOM scan\n");
+    }
     printf("Scanning %s\n\n", user_args.host);
     create_thread(user_args);
 
-    end_time = clock();
-    double total_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
-    printf("\nScan duration: %.2f seconds\n", total_time);
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
 
+    double total_time = (end_time.tv_sec - start_time.tv_sec) +
+                        (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+
+    printf("\nScan duration: %.2f seconds\n", total_time);
     return 0;
 }
