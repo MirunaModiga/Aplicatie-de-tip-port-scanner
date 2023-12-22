@@ -19,6 +19,8 @@ struct arguments
     int null_scan;              // opțiune pentru scanare NULL
     int fin_scan;               // opțiune pentru scanare FIN
     int xmas_scan;              // opțiune pentru scanare XMAS
+    int ack_scan;               // optiune pentru scanare ACK
+    int window_scan;            // optiune pentru scanare TCP window
 };
 
 struct argp_option options[] = {
@@ -90,6 +92,14 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
             {
                 arguments->xmas_scan = 1;
             }
+            else if (arg[0] == 'A')
+            {
+                arguments->ack_scan = 1;
+            }
+            else if (arg[0] == 'W')
+            {
+                arguments->window_scan = 1;
+            }
         }
         break;
     case 'H':
@@ -119,6 +129,8 @@ struct arguments parse_args(int argc, char *argv[])
     arguments.null_scan = 0;
     arguments.fin_scan = 0;
     arguments.xmas_scan = 0;
+    arguments.ack_scan = 0;
+    arguments.window_scan = 0;
 
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
     return arguments;

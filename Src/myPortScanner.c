@@ -49,6 +49,8 @@ struct thread_options
     int null_scan; // opțiune pentru scanare NULL
     int fin_scan;  // opțiune pentru scanare FIN
     int xmas_scan; // opțiune pentru scanare XMAS
+    int ack_scan;
+    int window_scan;
 };
 
 int get_local_ip(char **source_ip)
@@ -207,14 +209,14 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
     ip_header->tos = 0;
     ip_header->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
     ip_header->id = htons(54321);
-    ip_header->frag_off = htons(16384);
+    ip_header->frag_off = 0; // htons(16384)
     ip_header->ttl = 64;
     ip_header->protocol = IPPROTO_TCP;
     ip_header->check = 0;
     ip_header->saddr = inet_addr(source_ip);
     ip_header->daddr = inet_addr(args->host);
 
-    ip_header->check = csum((unsigned short *)packet, ip_header->tot_len >> 1);
+    ip_header->check = csum((unsigned short *)packet, ip_header->tot_len / 2); // >>1
 
     tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
 
@@ -263,6 +265,15 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
         tcp_header->ack = (uint16_t)0;
         tcp_header->urg = (uint16_t)1;
     }
+    else if (args->ack_scan == 1 || args->window_scan == 1)
+    {
+        tcp_header->fin = (uint16_t)0;
+        tcp_header->syn = (uint16_t)0;
+        tcp_header->rst = (uint16_t)0;
+        tcp_header->psh = (uint16_t)0;
+        tcp_header->ack = (uint16_t)1;
+        tcp_header->urg = (uint16_t)0;
+    }
 
     tcp_header->res2 = (uint16_t)0;
     tcp_header->window = (uint16_t)1;
@@ -303,7 +314,7 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
         return;
     }
 
-    // Asteptare raspuns
+    /* Asteptare raspuns
     fd_set read_fds;
     struct timeval timeout;
 
@@ -332,6 +343,17 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
         perror("Error: select() failed.");
         close(sockfd);
         return;
+    }*/
+
+    struct timeval timeout;
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0)
+    {
+        perror("Error setting SO_RCVTIMEO");
+        close(sockfd);
+        return;
     }
 
     // Primire raspuns
@@ -343,7 +365,24 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
 
     if (recv_len < 0)
     {
-        printf("Error: recvfrom() failed.\n");
+        if (errno == EWOULDBLOCK || errno == EAGAIN)
+        {
+            if (args->syn_scan == 1)
+            {
+                printf("PORT: %d\tSTARE: FILTERED (timeout) \n", port);
+                return;
+            }
+            if (args->fin_scan == 1 || args->xmas_scan == 1 || args->null_scan == 1)
+            {
+                printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
+                return;
+            }
+        }
+        else
+        {
+            perror("Error: recvfrom() failed.");
+        }
+
         close(sockfd);
         return;
     }
@@ -435,6 +474,49 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
             printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
         }
     }
+    else if (args->ack_scan || args->window_scan)
+    {
+        if (args->window_scan)
+        {
+            if (tcp_header->window == 0)
+            {
+                printf("PORT: %d\tSTARE: CLOSED\n", port);
+            }
+            else
+            {
+                if (args->verbose == 1)
+                {
+                    struct servent *s = getservbyport(htons(port), "tcp");
+                    if (s)
+                        printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+                }
+                else
+                {
+                    printf("PORT: %d\tSTARE: OPEN\n", port);
+                }
+            }
+        }
+        else if(args->ack_scan)
+        {
+            if (tcp_header->rst == 1)
+            {
+                if (args->verbose == 1)
+                {
+                    struct servent *s = getservbyport(htons(port), "tcp");
+                    if (s)
+                        printf("PORT: %d\tSTARE: UNFILTERED\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+                }
+                else
+                {
+                    printf("PORT: %d\tSTARE: UNFILTERED\n", port);
+                }
+            }
+            else
+            {
+                printf("PORT: %d\tSTARE: FILTERED \n", port);
+            }
+        }
+    }
 
     close(sockfd);
 }
@@ -504,7 +586,9 @@ void create_thread(struct arguments user_args)
         opt[thread_id].null_scan = user_args.null_scan;
         opt[thread_id].fin_scan = user_args.fin_scan;
         opt[thread_id].xmas_scan = user_args.xmas_scan;
-
+        opt[thread_id].ack_scan = user_args.ack_scan;
+        opt[thread_id].window_scan = user_args.window_scan;
+ 
         if (pthread_create(&threads[thread_id], NULL, thread_routine, &opt[thread_id]))
         {
             perror("pthread_create");
@@ -547,7 +631,7 @@ int main(int argc, char **argv)
     if (target == NULL)
     {
         perror("gethostbyname");
-        exit(-1);
+        return 0;
     }
 
     bzero(user_args.host, sizeof(user_args.host)); // face user_args->host 0
@@ -560,23 +644,31 @@ int main(int argc, char **argv)
     }
     else if (user_args.tcp_scan)
     {
-        printf("TCP scan\n");
+        printf("TCP Connect scan\n");
     }
     else if (user_args.syn_scan)
     {
-        printf("SYN scan\n");
+        printf("TCP SYN scan\n");
     }
     else if (user_args.xmas_scan)
     {
-        printf("XMAS scan\n");
+        printf("TCP XMAS scan\n");
     }
     else if (user_args.null_scan)
     {
-        printf("NULL scan\n");
+        printf("TCP NULL scan\n");
     }
     else if (user_args.fin_scan)
     {
-        printf("FIN scan\n");
+        printf("TCP FIN scan\n");
+    }
+    else if (user_args.ack_scan)
+    {
+        printf("TCP ACK scan\n");
+    }
+    else if (user_args.window_scan)
+    {
+        printf("TCP WINDOW scan\n");
     }
     else
     {
