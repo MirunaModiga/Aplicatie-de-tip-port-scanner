@@ -38,19 +38,20 @@ struct thread_options
     char host[INET_ADDRSTRLEN]; // inet_addrstrlen = 16
     int port;
     pthread_t thread_id;
-    int timeout;   // timeout pentru fiecare port
-    int threads;   // numar de thread-uri
-    int start;     // port inceput range
-    int end;       // port sfarsit range
-    int verbose;   // verbose
-    int tcp_scan;  // optiune pentru scanare TCP connect
-    int syn_scan;  // opțiune pentru scanare SYN
-    int udp_scan;  // opțiune pentru scanare UDP
-    int null_scan; // opțiune pentru scanare NULL
-    int fin_scan;  // opțiune pentru scanare FIN
-    int xmas_scan; // opțiune pentru scanare XMAS
-    int ack_scan;
-    int window_scan;
+    int timeout;     // timeout pentru fiecare port
+    int threads;     // numar de thread-uri
+    int start;       // port inceput range
+    int end;         // port sfarsit range
+    int verbose;     // verbose
+    int tcp_scan;    // optiune pentru scanare TCP connect
+    int syn_scan;    // opțiune pentru scanare SYN
+    int udp_scan;    // opțiune pentru scanare UDP
+    int null_scan;   // opțiune pentru scanare NULL
+    int fin_scan;    // opțiune pentru scanare FIN
+    int xmas_scan;   // opțiune pentru scanare XMAS
+    int ack_scan;    // optiune scanare TCP ACK
+    int window_scan; // optiune scanare TCP Window
+    char custom[20];
 };
 
 int get_local_ip(char **source_ip)
@@ -190,6 +191,171 @@ unsigned short csum(unsigned short *ptr, int nbytes)
     return (answer);
 }
 
+void CustomScan(struct thread_options *args, int port)
+{
+    int sockfd;
+    struct iphdr *ip_header;
+    struct tcphdr *tcp_header;
+    char packet[4096];
+    struct pseudo_header psh;
+
+    sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+
+    char *source_ip = (char *)malloc(INET_ADDRSTRLEN * sizeof(char));
+    get_local_ip(&source_ip);
+
+    ip_header = (struct iphdr *)packet;
+    ip_header->ihl = 5;
+    ip_header->version = 4;
+    ip_header->tos = 0;
+    ip_header->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
+    ip_header->id = htons(54321);
+    ip_header->frag_off = 0;
+    ip_header->ttl = 64;
+    ip_header->protocol = IPPROTO_TCP;
+    ip_header->check = 0;
+    ip_header->saddr = inet_addr(source_ip);
+    ip_header->daddr = inet_addr(args->host);
+
+    ip_header->check = csum((unsigned short *)packet, ip_header->tot_len / 2); // >>1
+
+    tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
+
+    tcp_header->th_sport = htons(rand() % (65535 - 1024) + 1024);
+    tcp_header->th_dport = htons((uint16_t)port);
+
+    tcp_header->seq = rand();
+    tcp_header->ack_seq = 0;
+
+    tcp_header->res1 = (uint16_t)0;
+    tcp_header->doff = (uint16_t)5;
+
+    tcp_header->fin = (uint16_t)1;
+    tcp_header->syn = (uint16_t)0;
+    tcp_header->rst = (uint16_t)0;
+    tcp_header->psh = (uint16_t)0;
+    tcp_header->ack = (uint16_t)0;
+    tcp_header->urg = (uint16_t)0;
+
+    if (strstr(args->custom, "SYN") != NULL)
+    {
+        tcp_header->syn = (uint16_t)1;
+    }
+    if (strstr(args->custom, "FIN") != NULL)
+    {
+        tcp_header->fin = (uint16_t)1;
+    }
+    if (strstr(args->custom, "ACK") != NULL)
+    {
+        tcp_header->ack = (uint16_t)1;
+    }
+    if (strstr(args->custom, "URG") != NULL)
+    {
+        tcp_header->urg = (uint16_t)1;
+    }
+    if (strstr(args->custom, "PSH") != NULL)
+    {
+        tcp_header->psh = (uint16_t)1;
+    }
+    if (strstr(args->custom, "RST") != NULL)
+    {
+        tcp_header->rst = (uint16_t)1;
+    }
+
+    // IP_HDRINCL to tell the kernel that headers are included in the packet
+    int one = 1;
+    const int *val = &one;
+
+    if (setsockopt(sockfd, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0)
+    {
+        printf("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n", errno, strerror(errno));
+        return;
+    }
+
+    struct sockaddr_in dest;
+    memset(&dest, 0, sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    dest.sin_addr.s_addr = inet_addr(args->host);
+
+    psh.source_address = inet_addr(source_ip);
+    psh.dest_address = dest.sin_addr.s_addr;
+    psh.placeholder = 0;
+    psh.protocol = IPPROTO_TCP;
+    psh.tcp_length = htons(sizeof(struct tcphdr));
+
+    memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
+
+    tcp_header->check = csum((unsigned short *)&psh, sizeof(struct pseudo_header));
+
+    // Trimitere packet
+    if (sendto(sockfd, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0)
+    {
+        printf("Error: sendto() failed.\n");
+        close(sockfd);
+        return;
+    }
+
+    struct timeval timeout;
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0)
+    {
+        perror("Error setting SO_RCVTIMEO");
+        close(sockfd);
+        return;
+    }
+
+    // Primire raspuns
+    char recv_buf[4096];
+    struct sockaddr_in recv_src;
+    socklen_t recv_src_len = sizeof(recv_src);
+
+    int recv_len = recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_src, &recv_src_len);
+
+    if (recv_len < 0)
+    {
+        if (errno == EWOULDBLOCK || errno == EAGAIN)
+        {
+            printf("TIMEOUT \n");
+            return;
+        }
+        else
+        {
+            perror("Error: recvfrom() failed.");
+        }
+
+        close(sockfd);
+        return;
+    }
+
+    ip_header = (struct iphdr *)recv_buf;
+    tcp_header = (struct tcphdr *)(recv_buf + sizeof(struct iphdr));
+
+    fflush(stdout);
+
+    if (tcp_header->rst == 1 && tcp_header->ack == 1)
+    {
+        if (args->verbose == 1)
+        {
+            struct servent *s = getservbyport(htons(port), "tcp");
+            if (s)
+                printf("PORT: %d\tSTARE: OPEN\t PROTOCOL:%s\t SERVICE:%s\t\n", port, s->s_proto, s->s_name);
+        }
+        else
+        {
+            printf("PORT: %d\tSTARE: OPEN \n", port);
+        }
+    }
+    else
+    {
+        printf("PORT: %d\tFILTERED\n", port);
+    }
+
+    close(sockfd);
+}
+
 void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
 {
     int sockfd;
@@ -209,7 +375,7 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
     ip_header->tos = 0;
     ip_header->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
     ip_header->id = htons(54321);
-    ip_header->frag_off = 0; // htons(16384)
+    ip_header->frag_off = 0;
     ip_header->ttl = 64;
     ip_header->protocol = IPPROTO_TCP;
     ip_header->check = 0;
@@ -314,37 +480,6 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
         return;
     }
 
-    /* Asteptare raspuns
-    fd_set read_fds;
-    struct timeval timeout;
-
-    FD_ZERO(&read_fds);
-    FD_SET(sockfd, &read_fds);
-
-    timeout.tv_sec = 15;
-    timeout.tv_usec = 0;
-
-    int ret = select(sockfd + 1, &read_fds, NULL, NULL, &timeout);
-    if (ret == 0)
-    {
-        if (args->syn_scan == 1)
-        {
-            printf("PORT: %d\tSTARE: FILTERED (timeout) \n", port);
-            return;
-        }
-        if (args->fin_scan == 1 || args->xmas_scan == 1 || args->null_scan == 1)
-        {
-            printf("PORT: %d\tSTARE: OPEN|FILTERED \n", port);
-            return;
-        }
-    }
-    else if (ret < 0)
-    {
-        perror("Error: select() failed.");
-        close(sockfd);
-        return;
-    }*/
-
     struct timeval timeout;
     timeout.tv_sec = 30;
     timeout.tv_usec = 0;
@@ -354,7 +489,7 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
         perror("Error setting SO_RCVTIMEO");
         close(sockfd);
         return;
-    }
+    } 
 
     // Primire raspuns
     char recv_buf[4096];
@@ -496,7 +631,7 @@ void SYN_NULL_FIN_XMAS_scan(struct thread_options *args, int port)
                 }
             }
         }
-        else if(args->ack_scan)
+        else if (args->ack_scan)
         {
             if (tcp_header->rst == 1)
             {
@@ -542,9 +677,13 @@ void *thread_routine(void *thread_args)
         {
             UDP_scan(args, port);
         }
-        else
+        else if(args->fin_scan || args->xmas_scan || args->window_scan || args->ack_scan || args->null_scan || args->syn_scan)
         {
             SYN_NULL_FIN_XMAS_scan(args, port);
+        }
+        else 
+        {
+            CustomScan(args, port);
         }
     }
     free(ports);
@@ -588,7 +727,8 @@ void create_thread(struct arguments user_args)
         opt[thread_id].xmas_scan = user_args.xmas_scan;
         opt[thread_id].ack_scan = user_args.ack_scan;
         opt[thread_id].window_scan = user_args.window_scan;
- 
+        strcpy(opt[thread_id].custom, user_args.custom);
+
         if (pthread_create(&threads[thread_id], NULL, thread_routine, &opt[thread_id]))
         {
             perror("pthread_create");

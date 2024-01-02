@@ -21,6 +21,7 @@ struct arguments
     int xmas_scan;              // opțiune pentru scanare XMAS
     int ack_scan;               // optiune pentru scanare ACK
     int window_scan;            // optiune pentru scanare TCP window
+    char custom[20];            // optiunea pt flaguri scanare custom
 };
 
 struct argp_option options[] = {
@@ -30,6 +31,7 @@ struct argp_option options[] = {
     {"threads", 'T', "THREADS NUMBER", 0, "Number of threads to use for the scan"},
     {"verbose", 'v', "VERBOSE 1/0", 0, "Verbose mode"},
     {"scan type", 's', "SCAN_TYPE", 0, "TCP/UDP/SYN/NULL/FIN/XMAS"},
+    {"custom scan", 'c', "Customize flags", 0, "SYN/ACK/FIN/RST/PSH/URG"},
     {0}};
 
 error_t parse_opt(int key, char *arg, struct argp_state *state)
@@ -64,6 +66,9 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
         break;
     case 'v':
         arguments->verbose = 1;
+        break;
+    case 'c':
+        strcpy(arguments->custom, arg);
         break;
     case 's':
         if (arg != NULL)
@@ -131,6 +136,7 @@ struct arguments parse_args(int argc, char *argv[])
     arguments.xmas_scan = 0;
     arguments.ack_scan = 0;
     arguments.window_scan = 0;
+    strcpy(arguments.custom, "");
 
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
     return arguments;
