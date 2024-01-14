@@ -118,6 +118,7 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
 }
 
 struct argp argp = {options, parse_opt};
+//https://www.gnu.org/software/libc/manual/html_node/Argp-Example-3.html
 
 struct arguments parse_args(int argc, char *argv[])
 {
