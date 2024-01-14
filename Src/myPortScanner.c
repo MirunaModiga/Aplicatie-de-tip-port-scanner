@@ -78,7 +78,7 @@ int get_local_ip(char **source_ip)
     *source_ip = strdup(buffer);
 
     close(sock);
-}
+} //get_local_ip - https://www.binarytides.com/get-local-ip-c-linux/
 
 void TCP_scan(struct thread_options *args, int port)
 {
@@ -182,7 +182,7 @@ unsigned short csum(unsigned short *ptr, int nbytes)
     answer = (short)~sum;
 
     return (answer);
-}
+} //csum - https://www.cs.toronto.edu/~arnold/427/15s/csc427/indepth/syn-flooding/flood.c
 
 void CustomScan(struct thread_options *args, int port)
 {
