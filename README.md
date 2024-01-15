@@ -24,9 +24,9 @@ Compilare: make
   TCP XMAS Scan: -sX\
   TCP ACK Scan: -sA\
   TCP WINDOW Scan: -sW\
-  CUSTOM Scan Types with flags: -sC <SYNACKURGFINPSHRST>\
+  CUSTOM Scan Types with flags: -sC SYNACKURGFINPSHRST(in functie de ce flag-uri doresc)\
   
   # Rezultate scanare
 Open 	- rețeaua țintă acceptă conexiuni sau pachete și a răspuns cu un pachet care arată că este în ascultare\
 Closed 	- rețeaua a primit cererea, dar nu rulează niciun serviciu pe acel port\
-Filtered 	- un pachet de cerere a fost trimis, dar gazda nu a răspuns și nu este în ascultare\
+Filtered 	- un pachet de cerere a fost trimis, dar gazda nu a răspuns și nu este în ascultare
