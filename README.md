@@ -10,23 +10,23 @@ Compilare: make
 ./myPortScanner   -h   google.com  -p  80  -T  1  -sS
 
 # Optiuni disponibile
--h   -  adresa ip/hostname__
--p   -  portul/range-ul de porturi pe care dorim sa le scanăm__
--T   -  numărul de thread-uri pe care dorim sa le folosim in scanare__
--v   -  verifică tipul de serviciu găsit pe port și tipul de protocol__
+-h   -  adresa ip/hostname\
+-p   -  portul/range-ul de porturi pe care dorim sa le scanăm\
+-T   -  numărul de thread-uri pe care dorim sa le folosim in scanare\
+-v   -  verifică tipul de serviciu găsit pe port și tipul de protocol\
 
 # Scanari disponibile
-  TCP SYN Scan: -sS__
-  TCP CONNECT Scan: -sT__
-  UDP Scan: -sU__
-  TCP FIN Scan: -sF__
-  TCP NULL Scan: -sN__
-  TCP XMAS Scan: -sX__
-  TCP ACK Scan: -sA__
-  TCP WINDOW Scan: -sW__
-  CUSTOM Scan Types with flags: -sC <SYNACKURGFINPSHRST>__
+  TCP SYN Scan: -sS\
+  TCP CONNECT Scan: -sT\
+  UDP Scan: -sU\
+  TCP FIN Scan: -sF\
+  TCP NULL Scan: -sN\
+  TCP XMAS Scan: -sX\
+  TCP ACK Scan: -sA\
+  TCP WINDOW Scan: -sW\
+  CUSTOM Scan Types with flags: -sC <SYNACKURGFINPSHRST>\
 
   # Rezultate scanare
-Open 	- rețeaua țintă acceptă conexiuni sau pachete și a răspuns cu un pachet care arată că este în ascultare__
-Closed 	- rețeaua a primit cererea, dar nu rulează niciun serviciu pe acel port__
-Filtered 	- un pachet de cerere a fost trimis, dar gazda nu a răspuns și nu este în ascultare__
+Open 	- rețeaua țintă acceptă conexiuni sau pachete și a răspuns cu un pachet care arată că este în ascultare\
+Closed 	- rețeaua a primit cererea, dar nu rulează niciun serviciu pe acel port\
+Filtered 	- un pachet de cerere a fost trimis, dar gazda nu a răspuns și nu este în ascultare\
