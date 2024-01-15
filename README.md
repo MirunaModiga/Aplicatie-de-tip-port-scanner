@@ -25,7 +25,7 @@ Compilare: make
   TCP ACK Scan: -sA\
   TCP WINDOW Scan: -sW\
   CUSTOM Scan Types with flags: -sC <SYNACKURGFINPSHRST>\
-
+  
   # Rezultate scanare
 Open 	- rețeaua țintă acceptă conexiuni sau pachete și a răspuns cu un pachet care arată că este în ascultare\
 Closed 	- rețeaua a primit cererea, dar nu rulează niciun serviciu pe acel port\
