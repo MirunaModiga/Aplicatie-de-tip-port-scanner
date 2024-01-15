@@ -13,7 +13,7 @@ Compilare: make
 -h   -  adresa ip/hostname\
 -p   -  portul/range-ul de porturi pe care dorim sa le scanăm\
 -T   -  numărul de thread-uri pe care dorim sa le folosim in scanare\
--v   -  verifică tipul de serviciu găsit pe port și tipul de protocol\
+-v   -  verifică tipul de serviciu găsit pe port și tipul de protocol
 
 # Scanari disponibile
   TCP SYN Scan: -sS\
@@ -24,7 +24,7 @@ Compilare: make
   TCP XMAS Scan: -sX\
   TCP ACK Scan: -sA\
   TCP WINDOW Scan: -sW\
-  CUSTOM Scan Types with flags: -sC SYNACKURGFINPSHRST(in functie de ce flag-uri doresc)\
+  CUSTOM Scan Types with flags: -sC SYNACKURGFINPSHRST(in functie de ce flag-uri doresc)
   
   # Rezultate scanare
 Open 	- rețeaua țintă acceptă conexiuni sau pachete și a răspuns cu un pachet care arată că este în ascultare\
